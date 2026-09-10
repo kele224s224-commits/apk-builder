@@ -25,7 +25,7 @@ jobs:
         with:
           node-version: 20
 
-      - name: Compilation avec Nom et Icône personnalisés
+      - name: Compilation de l'APK Android
         env:
           CODE_APP: ${{ github.event.client_payload.code_html }}
           NOM_APP: ${{ github.event.client_payload.app_name }}
@@ -39,13 +39,17 @@ jobs:
           npx cap init "$NOM_APP" "com.studio.app" --web-dir www
           npx cap add android
           cd android
-          
-          # Patch nom de l'application officiel
-          sed -i "s/<string name=\"app_name\">.*<\/string>/<string name=\"app_name\">$NOM_APP<\/string>/g" app/src/main/res/values/strings.xml || true
-          
-          # Injection de l'icône personnalisée si fournie
+
+          # Conversion et injection de l'icône en vrai PNG certifié
           if [ -n "$ICONE_BASE64" ]; then
-            echo "$ICONE_BASE64" | sed 's/data:image\/[^;]*;base64,//' | base64 -d > icon.png
+            python3 -m pip install --quiet Pillow
+            python3 -c "
+          import base64, io
+          from PIL import Image
+          data = '''$ICONE_BASE64'''.split(',')[-1]
+          img = Image.open(io.BytesIO(base64.b64decode(data))).convert('RGBA')
+          img.resize((192, 192)).save('icon.png', 'PNG')
+          "
             for dir in app/src/main/res/mipmap-*; do
               cp icon.png "$dir/ic_launcher.png" || true
               cp icon.png "$dir/ic_launcher_round.png" || true
@@ -53,13 +57,15 @@ jobs:
             done
           fi
 
-          # Patch anti-conflit Kotlin
+          # Patch anti-conflit de bibliothèques
           sed -i "s/1.7.0/1.6.1/g" variables.gradle || true
           echo "android.enableJetifier=true" >> gradle.properties
+
+          # Compilation officielle Gradle
           chmod +x gradlew
           ./gradlew assembleDebug
 
-      - name: Mise à disposition du fichier APK
+      - name: Mise à disposition de l'APK téléchargeable
         uses: softprops/action-gh-release@v2
         with:
           tag_name: build-${{ github.run_number }}
