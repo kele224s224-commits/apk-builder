@@ -40,21 +40,24 @@ jobs:
           npx cap add android
           cd android
 
-          # Conversion et injection de l'icône en vrai PNG certifié
+          # Traitement sécurisé de l'icône (évite le conflit anydpi-v26)
           if [ -n "$ICONE_BASE64" ]; then
             python3 -m pip install --quiet Pillow
             python3 -c "
-          import base64, io
+          import os, base64, io
           from PIL import Image
-          data = '''$ICONE_BASE64'''.split(',')[-1]
-          img = Image.open(io.BytesIO(base64.b64decode(data))).convert('RGBA')
-          img.resize((192, 192)).save('icon.png', 'PNG')
+          raw = os.environ.get('ICONE_BASE64', '').split(',')[-1]
+          if raw:
+              img = Image.open(io.BytesIO(base64.b64decode(raw))).convert('RGBA')
+              img.resize((192, 192)).save('icon.png', 'PNG')
           "
-            for dir in app/src/main/res/mipmap-*; do
-              cp icon.png "$dir/ic_launcher.png" || true
-              cp icon.png "$dir/ic_launcher_round.png" || true
-              cp icon.png "$dir/ic_launcher_foreground.png" || true
-            done
+            if [ -f icon.png ]; then
+              for dir in app/src/main/res/mipmap-[hmx]*; do
+                cp icon.png "$dir/ic_launcher.png" || true
+                cp icon.png "$dir/ic_launcher_round.png" || true
+                cp icon.png "$dir/ic_launcher_foreground.png" || true
+              done
+            fi
           fi
 
           # Patch anti-conflit de bibliothèques
@@ -65,7 +68,7 @@ jobs:
           chmod +x gradlew
           ./gradlew assembleDebug
 
-      - name: Mise à disposition de l'APK téléchargeable
+      - name: Mise à disposition du fichier APK
         uses: softprops/action-gh-release@v2
         with:
           tag_name: build-${{ github.run_number }}
