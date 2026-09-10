@@ -16,19 +16,24 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
+      - name: Configuration SDK Android
+        uses: android-actions/setup-android@v3
+
       - name: Configuration Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
 
       - name: Compilation de l'APK Android
+        env:
+          CODE_APP: ${{ github.event.client_payload.code_html }}
         run: |
-          mkdir app && cd app
+          mkdir -p myapp/www
+          printf "%s" "$CODE_APP" > myapp/www/index.html
+          cd myapp
           npm init -y
           npm install @capacitor/core @capacitor/cli @capacitor/android
           npx cap init "MonApplication" "com.studio.app" --web-dir www
-          mkdir www
-          echo "${{ github.event.client_payload.code_html }}" > www/index.html
           npx cap add android
           cd android
           chmod +x gradlew
@@ -39,6 +44,6 @@ jobs:
         with:
           tag_name: build-${{ github.run_number }}
           name: Build ${{ github.run_number }}
-          files: app/android/app/build/outputs/apk/debug/app-debug.apk
+          files: myapp/android/app/build/outputs/apk/debug/app-debug.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
