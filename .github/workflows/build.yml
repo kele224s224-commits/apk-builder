@@ -25,7 +25,7 @@ jobs:
         with:
           node-version: 20
 
-      - name: Compilation avec Identifiant Unique
+      - name: Compilation avec Permissions Caméra & Audio
         env:
           CODE_APP: ${{ github.event.client_payload.code_html }}
           NOM_APP: ${{ github.event.client_payload.app_name }}
@@ -37,7 +37,6 @@ jobs:
           npm init -y
           npm install @capacitor/core@6 @capacitor/cli@6 @capacitor/android@6
           
-          # Génération d'un identifiant de paquet unique automatique (ex: com.kele.kelephoto)
           CLEAN_ID=$(echo "$NOM_APP" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]//g')
           [ -z "$CLEAN_ID" ] && CLEAN_ID="app${{ github.run_number }}"
           PACKAGE_ID="com.kele.${CLEAN_ID}"
@@ -46,7 +45,24 @@ jobs:
           npx cap add android
           cd android
 
-          # Traitement et injection sécurisée de l'icône
+          # Injection officielle des permissions Caméra et Audio dans AndroidManifest.xml
+          python3 -c "
+          with open('app/src/main/AndroidManifest.xml', 'r') as f:
+              content = f.read()
+          perms = '''
+              <uses-permission android:name=\"android.permission.CAMERA\" />
+              <uses-permission android:name=\"android.permission.RECORD_AUDIO\" />
+              <uses-permission android:name=\"android.permission.MODIFY_AUDIO_SETTINGS\" />
+              <uses-feature android:name=\"android.hardware.camera\" android:required=\"false\" />
+              <uses-feature android:name=\"android.hardware.camera.autofocus\" android:required=\"false\" />
+          '''
+          if '<application' in content:
+              content = content.replace('<application', perms + '    <application')
+              with open('app/src/main/AndroidManifest.xml', 'w') as f:
+                  f.write(content)
+          "
+
+          # Traitement sécurisé de l'icône
           if [ -n "$ICONE_BASE64" ]; then
             python3 -m pip install --quiet Pillow
             python3 -c "
