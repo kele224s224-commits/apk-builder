@@ -25,19 +25,35 @@ jobs:
         with:
           node-version: 20
 
-      - name: Compilation de l'APK Android
+      - name: Compilation avec Nom et Icône personnalisés
         env:
           CODE_APP: ${{ github.event.client_payload.code_html }}
+          NOM_APP: ${{ github.event.client_payload.app_name }}
+          ICONE_BASE64: ${{ github.event.client_payload.app_icon }}
         run: |
           mkdir -p myapp/www
           printf "%s" "$CODE_APP" > myapp/www/index.html
           cd myapp
           npm init -y
           npm install @capacitor/core@6 @capacitor/cli@6 @capacitor/android@6
-          npx cap init "MonApplication" "com.studio.app" --web-dir www
+          npx cap init "$NOM_APP" "com.studio.app" --web-dir www
           npx cap add android
           cd android
-          # Patch anti-conflit Kotlin / AppCompat
+          
+          # Patch nom de l'application officiel
+          sed -i "s/<string name=\"app_name\">.*<\/string>/<string name=\"app_name\">$NOM_APP<\/string>/g" app/src/main/res/values/strings.xml || true
+          
+          # Injection de l'icône personnalisée si fournie
+          if [ -n "$ICONE_BASE64" ]; then
+            echo "$ICONE_BASE64" | sed 's/data:image\/[^;]*;base64,//' | base64 -d > icon.png
+            for dir in app/src/main/res/mipmap-*; do
+              cp icon.png "$dir/ic_launcher.png" || true
+              cp icon.png "$dir/ic_launcher_round.png" || true
+              cp icon.png "$dir/ic_launcher_foreground.png" || true
+            done
+          fi
+
+          # Patch anti-conflit Kotlin
           sed -i "s/1.7.0/1.6.1/g" variables.gradle || true
           echo "android.enableJetifier=true" >> gradle.properties
           chmod +x gradlew
@@ -47,7 +63,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: build-${{ github.run_number }}
-          name: Build ${{ github.run_number }}
+          name: ${{ github.event.client_payload.app_name }} v${{ github.run_number }}
           files: myapp/android/app/build/outputs/apk/debug/app-debug.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
