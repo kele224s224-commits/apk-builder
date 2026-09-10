@@ -25,7 +25,7 @@ jobs:
         with:
           node-version: 20
 
-      - name: Compilation avec Permissions Caméra & Audio
+      - name: Compilation avec Passerelle Galerie Android
         env:
           CODE_APP: ${{ github.event.client_payload.code_html }}
           NOM_APP: ${{ github.event.client_payload.app_name }}
@@ -45,24 +45,86 @@ jobs:
           npx cap add android
           cd android
 
-          # Injection officielle des permissions Caméra et Audio dans AndroidManifest.xml
+          # 1. Permissions Caméra et Stockage
           python3 -c "
           with open('app/src/main/AndroidManifest.xml', 'r') as f:
-              content = f.read()
+              c = f.read()
           perms = '''
               <uses-permission android:name=\"android.permission.CAMERA\" />
               <uses-permission android:name=\"android.permission.RECORD_AUDIO\" />
               <uses-permission android:name=\"android.permission.MODIFY_AUDIO_SETTINGS\" />
               <uses-feature android:name=\"android.hardware.camera\" android:required=\"false\" />
-              <uses-feature android:name=\"android.hardware.camera.autofocus\" android:required=\"false\" />
           '''
-          if '<application' in content:
-              content = content.replace('<application', perms + '    <application')
+          if '<application' in c:
+              c = c.replace('<application', perms + '    <application')
               with open('app/src/main/AndroidManifest.xml', 'w') as f:
-                  f.write(content)
+                  f.write(c)
           "
 
-          # Traitement sécurisé de l'icône
+          # 2. Injection du Pont Natif vers la Galerie (MediaStore / DCIM)
+          python3 -c "
+          import glob
+          files = glob.glob('app/src/main/java/**/MainActivity.java', recursive=True)
+          if files:
+              target = files[0]
+              with open(target, 'r') as f:
+                  first_line = f.readline()
+              
+              java_code = f'''{first_line}
+          import android.os.Bundle;
+          import android.webkit.JavascriptInterface;
+          import android.content.ContentValues;
+          import android.net.Uri;
+          import android.provider.MediaStore;
+          import android.os.Environment;
+          import android.util.Base64;
+          import android.widget.Toast;
+          import com.getcapacitor.BridgeActivity;
+          import java.io.OutputStream;
+
+          public class MainActivity extends BridgeActivity {{
+              @Override
+              public void onCreate(Bundle savedInstanceState) {{
+                  super.onCreate(savedInstanceState);
+                  getBridge().getWebView().addJavascriptInterface(new NativeBridge(), \"AndroidGallery\");
+              }}
+
+              public class NativeBridge {{
+                  @JavascriptInterface
+                  public void saveToGallery(String base64Data, String filename, String mimeType) {{
+                      try {{
+                          byte[] bytes = Base64.decode(base64Data.contains(\",\") ? base64Data.split(\",\")[1] : base64Data, Base64.DEFAULT);
+                          ContentValues values = new ContentValues();
+                          values.put(MediaStore.MediaColumns.DISPLAY_NAME, filename);
+                          values.put(MediaStore.MediaColumns.MIME_TYPE, mimeType);
+                          
+                          Uri collection;
+                          if (mimeType.startsWith(\"video\")) {{
+                              values.put(MediaStore.Video.Media.RELATIVE_PATH, Environment.DIRECTORY_DCIM + \"/Camera\");
+                              collection = MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY);
+                          }} else {{
+                              values.put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_DCIM + \"/Camera\");
+                              collection = MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY);
+                          }}
+
+                          Uri item = getContentResolver().insert(collection, values);
+                          if (item != null) {{
+                              try (OutputStream out = getContentResolver().openOutputStream(item)) {{
+                                  out.write(bytes);
+                              }}
+                              runOnUiThread(() -> Toast.makeText(MainActivity.this, \"✓ Enregistré dans la Galerie !\", Toast.LENGTH_SHORT).show());
+                          }}
+                      }} catch (Exception e) {{
+                          e.printStackTrace();
+                      }}
+                  }}
+              }}
+          }}'''
+              with open(target, 'w') as f:
+                  f.write(java_code)
+          "
+
+          # 3. Icône personnalisée
           if [ -n "$ICONE_BASE64" ]; then
             python3 -m pip install --quiet Pillow
             python3 -c "
@@ -82,10 +144,8 @@ jobs:
             fi
           fi
 
-          # Patch anti-conflit de bibliothèques
           sed -i "s/1.7.0/1.6.1/g" variables.gradle || true
           echo "android.enableJetifier=true" >> gradle.properties
-
           chmod +x gradlew
           ./gradlew assembleDebug
 
