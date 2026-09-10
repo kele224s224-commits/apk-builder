@@ -1,5 +1,6 @@
 name: Fabriquer Vrai APK
 on:
+  workflow_dispatch:
   repository_dispatch:
     types: [build_apk]
 
@@ -36,6 +37,9 @@ jobs:
           npx cap init "MonApplication" "com.studio.app" --web-dir www
           npx cap add android
           cd android
+          # Patch anti-conflit Kotlin / AppCompat
+          sed -i "s/1.7.0/1.6.1/g" variables.gradle || true
+          echo "android.enableJetifier=true" >> gradle.properties
           chmod +x gradlew
           ./gradlew assembleDebug
 
