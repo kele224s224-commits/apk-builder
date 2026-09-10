@@ -10,11 +10,11 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Configuration Java 21
+      - name: Configuration Java 17
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
-          java-version: '21'
+          java-version: '17'
 
       - name: Configuration SDK Android
         uses: android-actions/setup-android@v3
@@ -32,7 +32,7 @@ jobs:
           printf "%s" "$CODE_APP" > myapp/www/index.html
           cd myapp
           npm init -y
-          npm install @capacitor/core @capacitor/cli @capacitor/android
+          npm install @capacitor/core@6 @capacitor/cli@6 @capacitor/android@6
           npx cap init "MonApplication" "com.studio.app" --web-dir www
           npx cap add android
           cd android
