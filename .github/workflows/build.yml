@@ -12,7 +12,7 @@ on:
         required: true
         type: string
       app_icon:
-        description: "Icône en base64 Data URL"
+        description: "Icône PNG en data URL"
         required: false
         type: string
 
@@ -44,24 +44,21 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Install System Dependencies (ImageMagick)
-        run: sudo apt-get update && sudo apt-get install -y imagemagick
-
-      - name: Configuration des variables
+      - name: Variables d'environnement
         shell: bash
         env:
           PAYLOAD_NAME: ${{ github.event.client_payload.app_name }}
           INPUT_NAME: ${{ inputs.app_name }}
         run: |
           NAME="${PAYLOAD_NAME:-$INPUT_NAME}"
-          [ -z "$NAME" ] && NAME="Kele App"
+          if [ -z "$NAME" ]; then NAME="Kele App"; fi
 
           SAFE="$(echo "$NAME" \
             | tr '[:upper:]' '[:lower:]' \
             | sed 's/[^a-z0-9]/ /g' \
             | awk '{for(i=1;i<=NF;i++)printf "%s",$i}' \
             | cut -c1-20)"
-          [ -z "$SAFE" ] && SAFE="keleapp"
+          if [ -z "$SAFE" ]; then SAFE="keleapp"; fi
 
           PACKAGE="com.kele.studio.app${SAFE}"
 
@@ -79,128 +76,118 @@ jobs:
         run: |
           mkdir -p myapp/www
           printf '%s' "${PAYLOAD_CODE:-$INPUT_CODE}" > myapp/www/index.html
+
           cd myapp
           npm init -y >/dev/null 2>&1
           npm install @capacitor/core@6 @capacitor/cli@6 @capacitor/android@6 >/dev/null 2>&1
           npx cap init "$APP_NAME" "$PACKAGE_NAME" --web-dir www >/dev/null
           npx cap add android >/dev/null
 
-      - name: Injecter les permissions Android
+      - name: Injecter les permissions Vidéo et Stockage dans le Manifeste
         shell: bash
         run: |
           python3 - <<'PY'
           from pathlib import Path
           p = Path("myapp/android/app/src/main/AndroidManifest.xml")
           s = p.read_text()
+
           perms = [
               "android.permission.INTERNET",
-              "android.permission.ACCESS_NETWORK_STATE",
-              "android.permission.CAMERA",
-              "android.permission.RECORD_AUDIO",
-              "android.permission.MODIFY_AUDIO_SETTINGS",
-              "android.permission.VIBRATE",
-              "android.permission.ACCESS_FINE_LOCATION",
-              "android.permission.ACCESS_COARSE_LOCATION",
-              "android.permission.POST_NOTIFICATIONS",
               "android.permission.READ_MEDIA_VIDEO",
               "android.permission.READ_MEDIA_AUDIO",
               "android.permission.READ_MEDIA_IMAGES",
+              "android.permission.READ_EXTERNAL_STORAGE",
+              "android.permission.WRITE_EXTERNAL_STORAGE",
               "android.permission.WAKE_LOCK",
-              "android.permission.FOREGROUND_SERVICE",
-              "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK",
-              "android.permission.BLUETOOTH",
-              "android.permission.BLUETOOTH_ADMIN",
-              "android.permission.BLUETOOTH_CONNECT",
-              "android.permission.BLUETOOTH_SCAN",
-              "android.permission.NFC",
+              "android.permission.VIBRATE"
           ]
+
           ins = "\n".join(f'    <uses-permission android:name="{x}" />' for x in perms)
           ins += '\n    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />'
+
           if "<application" in s:
               s = s.replace("<application", ins + "\n    <application", 1)
+
           p.write_text(s)
           PY
 
-      - name: Injecter le Bridge KeleAndroid
+      - name: Injecter le code Java natif (Bridge VLC / Galerie)
         shell: bash
         run: |
           mkdir -p myapp/android/app/src/main/java/com/kele/bridge
-          cat << 'EOF' > myapp/android/app/src/main/java/com/kele/bridge/KeleBridgeActivity.java
+
+          cat > myapp/android/app/src/main/java/com/kele/bridge/KeleBridgeActivity.java <<'JAVA'
           package com.kele.bridge;
 
           import android.Manifest;
-          import android.app.DownloadManager;
-          import android.app.NotificationChannel;
-          import android.app.NotificationManager;
-          import android.content.ClipData;
-          import android.content.ContentValues;
           import android.content.Context;
           import android.content.Intent;
           import android.content.pm.PackageManager;
-          import android.location.Location;
-          import android.location.LocationManager;
+          import android.database.Cursor;
           import android.net.Uri;
           import android.os.Build;
           import android.os.Bundle;
-          import android.os.Environment;
+          import android.os.Vibrator;
+          import android.os.VibrationEffect;
           import android.provider.MediaStore;
-          import android.provider.Settings;
           import android.webkit.JavascriptInterface;
+
           import com.getcapacitor.BridgeActivity;
+
           import org.json.JSONArray;
           import org.json.JSONObject;
-          import java.io.OutputStream;
+
           import java.util.ArrayList;
           import java.util.List;
 
           public class KeleBridgeActivity extends BridgeActivity {
+
               static final int REQ = 901;
 
               @Override
               public void onCreate(Bundle b) {
                   super.onCreate(b);
-                  getBridge().getWebView().addJavascriptInterface(new API(this), "KeleAndroid");
-                  requestUniversalPermissions();
+
+                  // Ajout de l'interface JavaScript KeleAndroid
+                  getBridge()
+                      .getWebView()
+                      .addJavascriptInterface(
+                          new API(this),
+                          "KeleAndroid"
+                      );
+
+                  // Demande immédiate des permissions de lecture vidéo
+                  requestStoragePermissions();
               }
 
-              void requestUniversalPermissions() {
+              public void requestStoragePermissions() {
                   if (Build.VERSION.SDK_INT < 23) {
-                      ready();
+                      notifyReady();
                       return;
                   }
-                  List<String> p = new ArrayList<>();
-                  String[] base = {
-                      Manifest.permission.CAMERA,
-                      Manifest.permission.RECORD_AUDIO,
-                      Manifest.permission.ACCESS_FINE_LOCATION,
-                      Manifest.permission.ACCESS_COARSE_LOCATION
-                  };
-                  for (String x : base) {
-                      if (checkSelfPermission(x) != PackageManager.PERMISSION_GRANTED) p.add(x);
-                  }
+
+                  List<String> perms = new ArrayList<>();
+
                   if (Build.VERSION.SDK_INT >= 33) {
-                      String[] media = {
-                          Manifest.permission.POST_NOTIFICATIONS,
-                          Manifest.permission.READ_MEDIA_VIDEO,
-                          Manifest.permission.READ_MEDIA_AUDIO,
-                          Manifest.permission.READ_MEDIA_IMAGES
-                      };
-                      for (String x : media) {
-                          if (checkSelfPermission(x) != PackageManager.PERMISSION_GRANTED) p.add(x);
+                      // Android 13+
+                      if (checkSelfPermission(Manifest.permission.READ_MEDIA_VIDEO) != PackageManager.PERMISSION_GRANTED) {
+                          perms.add(Manifest.permission.READ_MEDIA_VIDEO);
                       }
                   } else {
+                      // Android 12 et inférieur
                       if (checkSelfPermission(Manifest.permission.READ_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
-                          p.add(Manifest.permission.READ_EXTERNAL_STORAGE);
+                          perms.add(Manifest.permission.READ_EXTERNAL_STORAGE);
                       }
                   }
-                  if (!p.isEmpty()) {
-                      requestPermissions(p.toArray(new String[0]), REQ);
+
+                  if (!perms.isEmpty()) {
+                      requestPermissions(perms.toArray(new String[0]), REQ);
                   } else {
-                      ready();
+                      notifyReady();
                   }
               }
 
-              void ready() {
+              void notifyReady() {
                   getBridge().getWebView().post(() ->
                       getBridge().getWebView().evaluateJavascript(
                           "window.dispatchEvent(new Event('keleAndroidReady'))",
@@ -210,15 +197,123 @@ jobs:
               }
 
               @Override
-              public void onRequestPermissionsResult(int r, String[] p, int[] g) {
-                  super.onRequestPermissionsResult(r, p, g);
-                  ready();
+              public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+                  super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+                  notifyReady();
               }
 
+              /* =========================================================
+                 API ACCESSIBLE DEPUIS LE JAVASCRIPT
+              ========================================================= */
               public static class API {
                   final KeleBridgeActivity a;
-                  API(KeleBridgeActivity x) { a = x; }
 
+                  API(KeleBridgeActivity act) {
+                      this.a = act;
+                  }
+
+                  // 1. SCAN DE TOUTES LES VIDÉOS DU TÉLÉPHONE (STYLE VLC)
+                  @JavascriptInterface
+                  public String mediaList() {
+                      JSONArray videos = new JSONArray();
+
+                      String[] projection = {
+                          MediaStore.Video.Media._ID,
+                          MediaStore.Video.Media.DISPLAY_NAME,
+                          MediaStore.Video.Media.MIME_TYPE,
+                          MediaStore.Video.Media.DURATION,
+                          MediaStore.Video.Media.SIZE
+                      };
+
+                      try (Cursor cursor = a.getContentResolver().query(
+                              MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
+                              projection,
+                              null,
+                              null,
+                              MediaStore.Video.Media.DATE_ADDED + " DESC"
+                      )) {
+                          if (cursor != null) {
+                              while (cursor.moveToNext()) {
+                                  long id = cursor.getLong(0);
+                                  String name = cursor.getString(1);
+                                  String mime = cursor.getString(2);
+                                  long duration = cursor.getLong(3);
+                                  long size = cursor.getLong(4);
+
+                                  Uri videoUri = Uri.withAppendedPath(
+                                      MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
+                                      String.valueOf(id)
+                                  );
+
+                                  JSONObject item = new JSONObject();
+                                  item.put("id", id);
+                                  item.put("name", name != null ? name : "Vidéo");
+                                  item.put("kind", "video");
+                                  item.put("type", mime != null ? mime : "video/mp4");
+                                  item.put("duration", duration);
+                                  item.put("size", size);
+                                  item.put("src", videoUri.toString());
+
+                                  videos.put(item);
+                              }
+                          }
+                      } catch (Exception e) {
+                          e.printStackTrace();
+                      }
+
+                      return videos.toString();
+                  }
+
+                  @JavascriptInterface
+                  public String getMediaFiles() {
+                      return mediaList();
+                  }
+
+                  // 2. LECTURE DE LA VIDÉO PAR LE LECTEUR DU TÉLÉPHONE
+                  @JavascriptInterface
+                  public void playVideo(String uriStr) {
+                      try {
+                          Uri uri = Uri.parse(uriStr);
+                          Intent intent = new Intent(Intent.ACTION_VIEW);
+                          intent.setDataAndType(uri, "video/*");
+                          intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                          intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                          a.startActivity(intent);
+                      } catch (Exception e) {
+                          try {
+                              Intent fallback = new Intent(Intent.ACTION_VIEW, Uri.parse(uriStr));
+                              fallback.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                              fallback.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                              a.startActivity(fallback);
+                          } catch (Exception ignored) {}
+                      }
+                  }
+
+                  @JavascriptInterface
+                  public void open(String uriStr) {
+                      playVideo(uriStr);
+                  }
+
+                  // 3. DEMANDER LES PERMISSIONS SI REFUSÉES
+                  @JavascriptInterface
+                  public void requestPermissions() {
+                      a.runOnUiThread(a::requestStoragePermissions);
+                  }
+
+                  // 4. VIBRATION
+                  @JavascriptInterface
+                  public void vibrate(long ms) {
+                      Vibrator v = (Vibrator) a.getSystemService(Context.VIBRATOR_SERVICE);
+                      if (v != null) {
+                          if (Build.VERSION.SDK_INT >= 26) {
+                              v.vibrate(VibrationEffect.createOneShot(ms, VibrationEffect.DEFAULT_AMPLITUDE));
+                          } else {
+                              v.vibrate(ms);
+                          }
+                      }
+                  }
+
+                  // 5. INFOS APPAREIL
                   @JavascriptInterface
                   public String deviceInfo() {
                       try {
@@ -227,110 +322,11 @@ jobs:
                           o.put("model", Build.MODEL);
                           o.put("android", Build.VERSION.RELEASE);
                           o.put("sdk", Build.VERSION.SDK_INT);
-                          o.put("package", a.getPackageName());
                           return o.toString();
-                      } catch (Exception e) { return "{}"; }
-                  }
-
-                  @JavascriptInterface
-                  public void vibrate(long ms) {
-                      android.os.Vibrator v = (android.os.Vibrator) a.getSystemService(Context.VIBRATOR_SERVICE);
-                      if (v != null) {
-                          if (Build.VERSION.SDK_INT >= 26) {
-                              v.vibrate(android.os.VibrationEffect.createOneShot(ms, android.os.VibrationEffect.DEFAULT_AMPLITUDE));
-                          } else {
-                              v.vibrate(ms);
-                          }
+                      } catch (Exception e) {
+                          return "{}";
                       }
-                  }
-
-                  @JavascriptInterface
-                  public void clipboardCopy(String s) {
-                      android.content.ClipboardManager c = (android.content.ClipboardManager) a.getSystemService(Context.CLIPBOARD_SERVICE);
-                      if (c != null) c.setPrimaryClip(ClipData.newPlainText("Kele", s == null ? "" : s));
-                  }
-
-                  @JavascriptInterface
-                  public void openAppSettings() {
-                      Intent i = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
-                      i.setData(Uri.parse("package:" + a.getPackageName()));
-                      a.startActivity(i);
                   }
               }
           }
-          EOF
-
-          python3 - <<'PY'
-          from pathlib import Path
-          import re
-          root = Path("myapp/android/app/src/main/java")
-          bridge = root / "com/kele/bridge/KeleBridgeActivity.java"
-          candidates = [p for p in root.rglob("MainActivity.java") if p != bridge]
-          if not candidates:
-              raise SystemExit("MainActivity.java introuvable")
-          main = candidates[0]
-          text = main.read_text()
-          m = re.search(r'^\s*package\s+([A-Za-z0-9_.]+)\s*;', text, re.M)
-          if not m: raise SystemExit("Package non trouvé")
-          pkg = m.group(1)
-          main.write_text(f"package {pkg};\n\npublic class MainActivity extends com.kele.bridge.KeleBridgeActivity {{\n}}\n")
-          PY
-
-      - name: Configuration Versioning
-        shell: bash
-        run: |
-          python3 - <<'PY'
-          import os, re
-          from pathlib import Path
-          p = Path("myapp/android/app/build.gradle")
-          s = p.read_text()
-          s = re.sub(r'versionCode\s+\d+', f'versionCode {os.environ["VERSION_CODE"]}', s, count=1)
-          s = re.sub(r'versionName\s+"[^"]+"', f'versionName "{os.environ["VERSION_NAME"]}"', s, count=1)
-          p.write_text(s)
-          PY
-
-      - name: Configuration de l'icône de l'application
-        shell: bash
-        env:
-          ICON: ${{ github.event.client_payload.app_icon }}
-          INPUT_ICON: ${{ inputs.app_icon }}
-        run: |
-          ICON_DATA="${ICON:-$INPUT_ICON}"
-          if [[ "$ICON_DATA" == data:image/* ]]; then
-            echo "$ICON_DATA" | sed 's#^data:image/[^;]*;base64,##' | base64 -d > /tmp/raw_icon || true
-            if [ -s /tmp/raw_icon ]; then
-              convert /tmp/raw_icon -resize 512x512 /tmp/app_icon.png
-              mkdir -p myapp/android/app/src/main/res/drawable
-              cp /tmp/app_icon.png myapp/android/app/src/main/res/drawable/kele_icon.png
-              
-              # Force l'icône dans le Manifeste et supprime roundIcon qui prend la priorité
-              sed -i 's#android:icon="@mipmap/ic_launcher"#android:icon="@drawable/kele_icon"#' myapp/android/app/src/main/AndroidManifest.xml
-              sed -i 's#android:roundIcon="@mipmap/ic_launcher_round"#android:roundIcon="@drawable/kele_icon"#' myapp/android/app/src/main/AndroidManifest.xml
-            fi
-          fi
-
-      - name: Capacitor Sync
-        working-directory: myapp
-        run: npx cap sync android
-
-      - name: Build APK (Assemble Debug)
-        working-directory: myapp/android
-        run: |
-          chmod +x ./gradlew
-          ./gradlew assembleDebug --no-daemon
-
-      - name: Préparer l'APK
-        shell: bash
-        run: |
-          mkdir -p dist
-          CLEAN_NAME=$(echo "${APP_NAME}" | tr -cd '[:alnum:]_-')
-          [ -z "$CLEAN_NAME" ] && CLEAN_NAME="App"
-          cp myapp/android/app/build/outputs/apk/debug/app-debug.apk "dist/${CLEAN_NAME}-${BUILD_ID}.apk"
-
-      - name: Publier la Release GitHub
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: kele-build-${{ env.BUILD_ID }}
-          name: "${{ env.APP_NAME }} — ${{ env.BUILD_ID }}"
-          files: dist/*.apk
-          generate_release_notes: true
+          JAVA
