@@ -27,7 +27,6 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-
       - name: Checkout
         uses: actions/checkout@v4
 
@@ -61,14 +60,16 @@ jobs:
             | tr '[:upper:]' '[:lower:]' \
             | sed 's/[^a-z0-9]/ /g' \
             | awk '{for(i=1;i<=NF;i++)printf "%s",$i}' \
-            | cut -c1-24)"
+            | cut -c1-20)"
 
           if [ -z "$SAFE" ]; then
             SAFE="keleapp"
           fi
 
+          PACKAGE="com.kele.studio.app${SAFE}"
+
           echo "APP_NAME=$NAME" >> "$GITHUB_ENV"
-          echo "PACKAGE_NAME=com.kele.studio.$SAFE" >> "$GITHUB_ENV"
+          echo "PACKAGE_NAME=$PACKAGE" >> "$GITHUB_ENV"
           echo "BUILD_ID=$(date -u +%Y%m%d-%H%M%S)-${GITHUB_RUN_ID}" >> "$GITHUB_ENV"
           echo "VERSION_CODE=$((1000 + GITHUB_RUN_NUMBER))" >> "$GITHUB_ENV"
           echo "VERSION_NAME=1.0.${GITHUB_RUN_NUMBER}" >> "$GITHUB_ENV"
@@ -79,11 +80,9 @@ jobs:
           PAYLOAD_CODE: ${{ github.event.client_payload.code_html }}
           INPUT_CODE: ${{ inputs.code_html }}
         run: |
-
           mkdir -p myapp/www
 
-          printf '%s' "${PAYLOAD_CODE:-$INPUT_CODE}" \
-            > myapp/www/index.html
+          printf '%s' "${PAYLOAD_CODE:-$INPUT_CODE}" > myapp/www/index.html
 
           cd myapp
 
@@ -106,58 +105,33 @@ jobs:
       - name: Android permissions
         shell: bash
         run: |
-
           python3 - <<'PY'
-
           from pathlib import Path
 
-          p = Path(
-              "myapp/android/app/src/main/AndroidManifest.xml"
-          )
-
+          p = Path("myapp/android/app/src/main/AndroidManifest.xml")
           s = p.read_text()
 
           perms = [
-
               "android.permission.INTERNET",
-
               "android.permission.ACCESS_NETWORK_STATE",
-
               "android.permission.CAMERA",
-
               "android.permission.RECORD_AUDIO",
-
               "android.permission.MODIFY_AUDIO_SETTINGS",
-
               "android.permission.VIBRATE",
-
               "android.permission.ACCESS_FINE_LOCATION",
-
               "android.permission.ACCESS_COARSE_LOCATION",
-
               "android.permission.POST_NOTIFICATIONS",
-
               "android.permission.READ_MEDIA_VIDEO",
-
               "android.permission.READ_MEDIA_AUDIO",
-
               "android.permission.READ_MEDIA_IMAGES",
-
               "android.permission.WAKE_LOCK",
-
               "android.permission.FOREGROUND_SERVICE",
-
               "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK",
-
               "android.permission.BLUETOOTH",
-
               "android.permission.BLUETOOTH_ADMIN",
-
               "android.permission.BLUETOOTH_CONNECT",
-
               "android.permission.BLUETOOTH_SCAN",
-
-              "android.permission.NFC"
+              "android.permission.NFC",
           ]
 
           ins = "\n".join(
@@ -171,29 +145,25 @@ jobs:
               'android:maxSdkVersion="32" />'
           )
 
-          p.write_text(
-              s.replace(
+          if "<application" in s:
+              s = s.replace(
                   "<application",
                   ins + "\n    <application",
                   1
               )
-          )
 
+          p.write_text(s)
           PY
 
       - name: Universal Android Bridge
         shell: bash
         run: |
+          mkdir -p myapp/android/app/src/main/java/com/kele/bridge
 
-          mkdir -p \
-          myapp/android/app/src/main/java/com/kele/bridge
-
-          cat > myapp/android/app/src/main/java/com/kele/bridge/MainActivity.java <<'JAVA'
-
+          cat > myapp/android/app/src/main/java/com/kele/bridge/KeleBridgeActivity.java <<'JAVA'
           package com.kele.bridge;
 
           import android.Manifest;
-          import android.app.Activity;
           import android.app.DownloadManager;
           import android.app.NotificationChannel;
           import android.app.NotificationManager;
@@ -221,14 +191,13 @@ jobs:
           import java.util.ArrayList;
           import java.util.List;
 
-          public class MainActivity extends BridgeActivity {
+          public class KeleBridgeActivity extends BridgeActivity {
 
               static final int REQ = 901;
               static final int PICK = 902;
 
               @Override
               public void onCreate(Bundle b) {
-
                   super.onCreate(b);
 
                   getBridge()
@@ -242,93 +211,69 @@ jobs:
               }
 
               void requestUniversalPermissions() {
-
-                  if (Build.VERSION.SDK_INT < 23)
+                  if (Build.VERSION.SDK_INT < 23) {
+                      ready();
                       return;
+                  }
 
                   List<String> p = new ArrayList<>();
 
                   String[] base = {
-
                       Manifest.permission.CAMERA,
-
                       Manifest.permission.RECORD_AUDIO,
-
                       Manifest.permission.ACCESS_FINE_LOCATION,
-
                       Manifest.permission.ACCESS_COARSE_LOCATION
                   };
 
                   for (String x : base) {
-
-                      if (
-                          checkSelfPermission(x)
-                          != PackageManager.PERMISSION_GRANTED
-                      ) {
-
+                      if (checkSelfPermission(x)
+                          != PackageManager.PERMISSION_GRANTED) {
                           p.add(x);
                       }
                   }
 
                   if (Build.VERSION.SDK_INT >= 33) {
-
                       String[] media = {
-
                           Manifest.permission.POST_NOTIFICATIONS,
-
                           Manifest.permission.READ_MEDIA_VIDEO,
-
                           Manifest.permission.READ_MEDIA_AUDIO,
-
                           Manifest.permission.READ_MEDIA_IMAGES
                       };
 
                       for (String x : media) {
-
-                          if (
-                              checkSelfPermission(x)
-                              != PackageManager.PERMISSION_GRANTED
-                          ) {
-
+                          if (checkSelfPermission(x)
+                              != PackageManager.PERMISSION_GRANTED) {
                               p.add(x);
                           }
                       }
-
                   } else {
-
-                      if (
-                          checkSelfPermission(
-                              Manifest.permission.READ_EXTERNAL_STORAGE
-                          )
-                          != PackageManager.PERMISSION_GRANTED
-                      ) {
-
-                          p.add(
-                              Manifest.permission.READ_EXTERNAL_STORAGE
-                          );
+                      if (checkSelfPermission(
+                              Manifest.permission.READ_EXTERNAL_STORAGE)
+                          != PackageManager.PERMISSION_GRANTED) {
+                          p.add(Manifest.permission.READ_EXTERNAL_STORAGE);
                       }
                   }
 
                   if (!p.isEmpty()) {
-
                       requestPermissions(
                           p.toArray(new String[0]),
                           REQ
                       );
-
                   } else {
-
                       ready();
                   }
               }
 
               void ready() {
-
                   getBridge()
                       .getWebView()
-                      .evaluateJavascript(
-                          "window.dispatchEvent(new Event('keleAndroidReady'))",
-                          null
+                      .post(() ->
+                          getBridge()
+                              .getWebView()
+                              .evaluateJavascript(
+                                  "window.dispatchEvent(new Event('keleAndroidReady'))",
+                                  null
+                              )
                       );
               }
 
@@ -338,25 +283,20 @@ jobs:
                   String[] p,
                   int[] g
               ) {
-
                   super.onRequestPermissionsResult(r, p, g);
-
                   ready();
               }
 
               public static class API {
+                  final KeleBridgeActivity a;
 
-                  final Activity a;
-
-                  API(Activity x) {
+                  API(KeleBridgeActivity x) {
                       a = x;
                   }
 
                   @JavascriptInterface
                   public String deviceInfo() {
-
                       try {
-
                           JSONObject o = new JSONObject();
 
                           o.put(
@@ -387,24 +327,20 @@ jobs:
                           return o.toString();
 
                       } catch (Exception e) {
-
                           return "{}";
                       }
                   }
 
                   @JavascriptInterface
                   public String info() {
-
                       return deviceInfo();
                   }
 
                   @JavascriptInterface
                   public String mediaList() {
-
                       JSONArray all = new JSONArray();
 
                       videos(all);
-
                       audios(all);
 
                       return all.toString();
@@ -412,89 +348,50 @@ jobs:
 
                   @JavascriptInterface
                   public String getMediaFiles() {
-
                       return mediaList();
                   }
 
                   void videos(JSONArray all) {
 
                       String[] p = {
-
                           MediaStore.Video.Media._ID,
-
                           MediaStore.Video.Media.DISPLAY_NAME,
-
                           MediaStore.Video.Media.MIME_TYPE,
-
                           MediaStore.Video.Media.DURATION,
-
                           MediaStore.Video.Media.SIZE
                       };
 
                       try (
                           android.database.Cursor c =
-                          a.getContentResolver().query(
-
-                              MediaStore.Video.Media
-                                  .EXTERNAL_CONTENT_URI,
-
-                              p,
-
-                              null,
-
-                              null,
-
-                              MediaStore.Video.Media.DATE_ADDED
-                                  + " DESC"
-                          )
+                              a.getContentResolver().query(
+                                  MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
+                                  p,
+                                  null,
+                                  null,
+                                  MediaStore.Video.Media.DATE_ADDED + " DESC"
+                              )
                       ) {
 
-                          if (c == null)
-                              return;
+                          if (c == null) return;
 
                           while (c.moveToNext()) {
 
                               long id = c.getLong(0);
 
-                              JSONObject o =
-                                  new JSONObject();
+                              JSONObject o = new JSONObject();
 
                               o.put("id", id);
-
-                              o.put(
-                                  "name",
-                                  c.getString(1)
-                              );
-
-                              o.put(
-                                  "kind",
-                                  "video"
-                              );
-
-                              o.put(
-                                  "type",
-                                  c.getString(2)
-                              );
-
-                              o.put(
-                                  "duration",
-                                  c.getLong(3)
-                              );
-
-                              o.put(
-                                  "size",
-                                  c.getLong(4)
-                              );
+                              o.put("name", c.getString(1));
+                              o.put("kind", "video");
+                              o.put("type", c.getString(2));
+                              o.put("duration", c.getLong(3));
+                              o.put("size", c.getLong(4));
 
                               o.put(
                                   "src",
                                   Uri.withAppendedPath(
-
-                                      MediaStore.Video.Media
-                                          .EXTERNAL_CONTENT_URI,
-
-                                      "" + id
-
+                                      MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
+                                      String.valueOf(id)
                                   ).toString()
                               );
 
@@ -507,83 +404,44 @@ jobs:
                   void audios(JSONArray all) {
 
                       String[] p = {
-
                           MediaStore.Audio.Media._ID,
-
                           MediaStore.Audio.Media.DISPLAY_NAME,
-
                           MediaStore.Audio.Media.MIME_TYPE,
-
                           MediaStore.Audio.Media.DURATION,
-
                           MediaStore.Audio.Media.SIZE
                       };
 
                       try (
                           android.database.Cursor c =
-                          a.getContentResolver().query(
-
-                              MediaStore.Audio.Media
-                                  .EXTERNAL_CONTENT_URI,
-
-                              p,
-
-                              MediaStore.Audio.Media.IS_MUSIC
-                                  + " != 0",
-
-                              null,
-
-                              MediaStore.Audio.Media.DATE_ADDED
-                                  + " DESC"
-                          )
+                              a.getContentResolver().query(
+                                  MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+                                  p,
+                                  MediaStore.Audio.Media.IS_MUSIC + " != 0",
+                                  null,
+                                  MediaStore.Audio.Media.DATE_ADDED + " DESC"
+                              )
                       ) {
 
-                          if (c == null)
-                              return;
+                          if (c == null) return;
 
                           while (c.moveToNext()) {
 
                               long id = c.getLong(0);
 
-                              JSONObject o =
-                                  new JSONObject();
+                              JSONObject o = new JSONObject();
 
                               o.put("id", id);
-
-                              o.put(
-                                  "name",
-                                  c.getString(1)
-                              );
-
-                              o.put(
-                                  "kind",
-                                  "audio"
-                              );
-
-                              o.put(
-                                  "type",
-                                  c.getString(2)
-                              );
-
-                              o.put(
-                                  "duration",
-                                  c.getLong(3)
-                              );
-
-                              o.put(
-                                  "size",
-                                  c.getLong(4)
-                              );
+                              o.put("name", c.getString(1));
+                              o.put("kind", "audio");
+                              o.put("type", c.getString(2));
+                              o.put("duration", c.getLong(3));
+                              o.put("size", c.getLong(4));
 
                               o.put(
                                   "src",
                                   Uri.withAppendedPath(
-
-                                      MediaStore.Audio.Media
-                                          .EXTERNAL_CONTENT_URI,
-
-                                      "" + id
-
+                                      MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+                                      String.valueOf(id)
                                   ).toString()
                               );
 
@@ -626,17 +484,17 @@ jobs:
                   ) {
 
                       Intent i =
-                          new Intent(
-                              Intent.ACTION_SEND
-                          );
+                          new Intent(Intent.ACTION_SEND);
 
                       i.setType("text/plain");
 
+                      String body =
+                          (text == null ? "" : text) +
+                          (url == null ? "" : "\n" + url);
+
                       i.putExtra(
                           Intent.EXTRA_TEXT,
-                          (text == null ? "" : text)
-                          +
-                          (url == null ? "" : "\n" + url)
+                          body
                       );
 
                       a.startActivity(
@@ -651,7 +509,6 @@ jobs:
 
                   @JavascriptInterface
                   public void open(String url) {
-
                       webOpen(url);
                   }
 
@@ -679,8 +536,24 @@ jobs:
                               Context.VIBRATOR_SERVICE
                           );
 
-                      if (v != null)
-                          v.vibrate(ms);
+                      if (v != null) {
+
+                          if (Build.VERSION.SDK_INT >= 26) {
+
+                              v.vibrate(
+                                  android.os.VibrationEffect
+                                      .createOneShot(
+                                          ms,
+                                          android.os.VibrationEffect
+                                              .DEFAULT_AMPLITUDE
+                                      )
+                              );
+
+                          } else {
+
+                              v.vibrate(ms);
+                          }
+                      }
                   }
 
                   @JavascriptInterface
@@ -715,6 +588,8 @@ jobs:
                               Context.NOTIFICATION_SERVICE
                           );
 
+                      if (n == null) return;
+
                       if (Build.VERSION.SDK_INT >= 26) {
 
                           n.createNotificationChannel(
@@ -734,15 +609,13 @@ jobs:
                       try {
 
                           if (
-                              Build.VERSION.SDK_INT >= 23
-                              &&
+                              Build.VERSION.SDK_INT >= 23 &&
                               a.checkSelfPermission(
                                   Manifest.permission
                                       .ACCESS_FINE_LOCATION
-                              )
-                              != PackageManager.PERMISSION_GRANTED
+                              ) !=
+                              PackageManager.PERMISSION_GRANTED
                           ) {
-
                               return "{}";
                           }
 
@@ -770,24 +643,20 @@ jobs:
                                       );
 
                                   if (
-                                      x != null
-                                      &&
+                                      x != null &&
                                       (
-                                          best == null
-                                          ||
-                                          x.getTime()
-                                              > best.getTime()
+                                          best == null ||
+                                          x.getTime() >
+                                              best.getTime()
                                       )
                                   ) {
-
                                       best = x;
                                   }
 
                               } catch (Exception ignored) {}
                           }
 
-                          if (best == null)
-                              return "{}";
+                          if (best == null) return "{}";
 
                           JSONObject o =
                               new JSONObject();
@@ -810,7 +679,6 @@ jobs:
                           return o.toString();
 
                       } catch (Exception e) {
-
                           return "{}";
                       }
                   }
@@ -819,7 +687,7 @@ jobs:
                   public void requestPermissions() {
 
                       a.runOnUiThread(
-                          () -> requestUniversalPermissions()
+                          a::requestUniversalPermissions
                       );
                   }
 
@@ -833,13 +701,17 @@ jobs:
                           if (on) {
 
                               a.getWindow().addFlags(
-                                  128
+                                  android.view.WindowManager
+                                      .LayoutParams
+                                      .FLAG_KEEP_SCREEN_ON
                               );
 
                           } else {
 
                               a.getWindow().clearFlags(
-                                  128
+                                  android.view.WindowManager
+                                      .LayoutParams
+                                      .FLAG_KEEP_SCREEN_ON
                               );
                           }
                       });
@@ -895,14 +767,12 @@ jobs:
                                   .VISIBILITY_VISIBLE_NOTIFY_COMPLETED
                           );
 
-                          if (mime != null)
+                          if (mime != null) {
                               r.setMimeType(mime);
+                          }
 
                           r.setDestinationInExternalPublicDir(
-
-                              Environment
-                                  .DIRECTORY_DOWNLOADS,
-
+                              Environment.DIRECTORY_DOWNLOADS,
                               filename == null
                                   ? "kele-download"
                                   : filename
@@ -911,7 +781,6 @@ jobs:
                           return d.enqueue(r);
 
                       } catch (Exception e) {
-
                           return -1;
                       }
                   }
@@ -932,8 +801,7 @@ jobs:
                               );
 
                           boolean video =
-                              mime != null
-                              &&
+                              mime != null &&
                               mime.startsWith("video/");
 
                           ContentValues v =
@@ -956,10 +824,11 @@ jobs:
                               v.put(
                                   MediaStore.MediaColumns
                                       .RELATIVE_PATH,
-
                                   video
-                                      ? Environment.DIRECTORY_MOVIES
-                                      : Environment.DIRECTORY_PICTURES
+                                      ? Environment
+                                          .DIRECTORY_MOVIES
+                                      : Environment
+                                          .DIRECTORY_PICTURES
                               );
 
                               v.put(
@@ -971,13 +840,15 @@ jobs:
 
                           Uri u =
                               a.getContentResolver().insert(
-
                                   video
-                                      ? MediaStore.Video.Media
+                                      ? MediaStore
+                                          .Video
+                                          .Media
                                           .EXTERNAL_CONTENT_URI
-                                      : MediaStore.Images.Media
+                                      : MediaStore
+                                          .Images
+                                          .Media
                                           .EXTERNAL_CONTENT_URI,
-
                                   v
                               );
 
@@ -985,16 +856,16 @@ jobs:
 
                               try (
                                   OutputStream o =
-                                  a.getContentResolver()
-                                      .openOutputStream(u)
+                                      a.getContentResolver()
+                                          .openOutputStream(u)
                               ) {
 
-                                  o.write(data);
+                                  if (o != null) {
+                                      o.write(data);
+                                  }
                               }
 
-                              if (
-                                  Build.VERSION.SDK_INT >= 29
-                              ) {
+                              if (Build.VERSION.SDK_INT >= 29) {
 
                                   ContentValues done =
                                       new ContentValues();
@@ -1005,13 +876,12 @@ jobs:
                                       0
                                   );
 
-                                  a.getContentResolver()
-                                      .update(
-                                          u,
-                                          done,
-                                          null,
-                                          null
-                                      );
+                                  a.getContentResolver().update(
+                                      u,
+                                      done,
+                                      null,
+                                      null
+                                  );
                               }
                           }
 
@@ -1019,25 +889,69 @@ jobs:
                   }
               }
           }
-
           JAVA
 
-          cat > myapp/android/app/src/main/java/com/getcapacitor/MainActivity.java <<'JAVA'
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
 
-          package com.getcapacitor;
+          root = Path(
+              "myapp/android/app/src/main/java"
+          )
+
+          bridge = root / \
+              "com/kele/bridge/KeleBridgeActivity.java"
+
+          candidates = [
+              p
+              for p in root.rglob("MainActivity.java")
+              if p != bridge
+          ]
+
+          if not candidates:
+              raise SystemExit(
+                  "MainActivity.java introuvable après npx cap add android"
+              )
+
+          main = candidates[0]
+
+          text = main.read_text()
+
+          m = re.search(
+              r'^\s*package\s+([A-Za-z0-9_.]+)\s*;',
+              text,
+              re.M
+          )
+
+          if not m:
+              raise SystemExit(
+                  f"Package Java introuvable dans {main}"
+              )
+
+          package_name = m.group(1)
+
+          main.write_text(
+              f"""package {package_name};
 
           public class MainActivity
-              extends com.kele.bridge.MainActivity {
-          }
+              extends com.kele.bridge.KeleBridgeActivity {{
+          }}
+          """
+          )
 
-          JAVA
+          print(
+              f"Bridge installé dans: {main}"
+          )
+
+          print(
+              f"Package conservé: {package_name}"
+          )
+          PY
 
       - name: Version
         shell: bash
         run: |
-
           python3 - <<'PY'
-
           import os
           import re
           from pathlib import Path
@@ -1066,7 +980,6 @@ jobs:
           )
 
           p.write_text(s)
-
           PY
 
       - name: App icon
@@ -1075,7 +988,6 @@ jobs:
           ICON: ${{ github.event.client_payload.app_icon }}
           INPUT_ICON: ${{ inputs.app_icon }}
         run: |
-
           ICON="${ICON:-$INPUT_ICON}"
 
           if [[ "$ICON" == data:image/* ]]; then
@@ -1087,10 +999,11 @@ jobs:
             if file /tmp/icon.png | grep -qi PNG; then
 
               mkdir -p \
-              myapp/android/app/src/main/res/drawable
+                myapp/android/app/src/main/res/drawable
 
-              cp /tmp/icon.png \
-              myapp/android/app/src/main/res/drawable/kele_icon.png
+              cp \
+                /tmp/icon.png \
+                myapp/android/app/src/main/res/drawable/kele_icon.png
 
               sed -i \
                 's#android:icon="@mipmap/ic_launcher"#android:icon="@drawable/kele_icon"#' \
@@ -1110,12 +1023,11 @@ jobs:
       - name: Prepare APK
         shell: bash
         run: |
-
           mkdir -p dist
 
           cp \
-          myapp/android/app/build/outputs/apk/debug/app-debug.apk \
-          "dist/${APP_NAME// /_}-${BUILD_ID}.apk"
+            myapp/android/app/build/outputs/apk/debug/app-debug.apk \
+            "dist/${APP_NAME// /_}-${BUILD_ID}.apk"
 
       - name: Publish release
         uses: softprops/action-gh-release@v2
